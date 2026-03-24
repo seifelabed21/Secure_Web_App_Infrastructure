@@ -103,9 +103,9 @@ jobs:
           RUNTIMECONFIG_FILE="$APP_DIR/${APP_DLL%.dll}.runtimeconfig.json"
           if [ -f "$RUNTIMECONFIG_FILE" ]; then
             REQUIRED_RUNTIME_VERSION=$(sed -n 's/.*"version":[[:space:]]*"\([0-9]\+\.[0-9]\+\)\..*/\1/p' "$RUNTIMECONFIG_FILE" | head -n1)
-            if [ -n "$REQUIRED_RUNTIME_VERSION" ] && ! dotnet --list-runtimes | grep -q "Microsoft.AspNetCore.App $REQUIRED_RUNTIME_VERSION"; then
+            if [ -n "$REQUIRED_RUNTIME_VERSION" ] && ! dotnet --list-runtimes | grep -q "Microsoft.NETCore.App $REQUIRED_RUNTIME_VERSION"; then
               sudo apt-get update
-              sudo apt-get install -y "aspnetcore-runtime-$REQUIRED_RUNTIME_VERSION"
+              sudo apt-get install -y "dotnet-runtime-$REQUIRED_RUNTIME_VERSION" "aspnetcore-runtime-$REQUIRED_RUNTIME_VERSION"
             fi
           fi
 
