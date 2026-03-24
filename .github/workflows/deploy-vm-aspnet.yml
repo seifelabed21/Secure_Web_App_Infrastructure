@@ -47,7 +47,7 @@ jobs:
       - name: Publish ASP.NET Core app
         run: |
           dotnet restore
-          dotnet publish -c Release -o ./publish
+          dotnet publish -c Release -r linux-x64 --self-contained true /p:UseAppHost=true -o ./publish
 
       - name: Ensure VM host is configured
         run: |
@@ -87,7 +87,7 @@ jobs:
               '' \
               '[Service]' \
               'WorkingDirectory=$APP_DIR' \
-              'ExecStart=/usr/bin/dotnet $APP_DIR/$APP_DLL' \
+              'ExecStart=$APP_DIR/${APP_DLL%.dll}' \
               'Restart=always' \
               'RestartSec=10' \
               'KillSignal=SIGINT' \
