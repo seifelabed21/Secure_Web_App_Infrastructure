@@ -72,46 +72,46 @@ jobs:
       - name: Activate deployment on VM
         run: |
           set -eux
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.VM_USERNAME }}@${VM_HOST} "bash -s" <<EOF
-          set -eux
-          sudo mkdir -p ${APP_DIR}
-          sudo cp -r /tmp/securecloud-deploy/* ${APP_DIR}/
-          sudo chown -R \$USER:\$USER ${APP_DIR}
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.VM_USERNAME }}@${VM_HOST} "APP_DIR='${APP_DIR}' APP_DLL='${APP_DLL}' VM_USER='${{ secrets.VM_USERNAME }}' bash -s" <<'EOF'
+          set -euxo pipefail
+          sudo mkdir -p "$APP_DIR"
+          sudo cp -r /tmp/securecloud-deploy/* "$APP_DIR"/
+          sudo chown -R "$VM_USER":"$VM_USER" "$APP_DIR"
 
           SERVICE_FILE="/etc/systemd/system/securecloud-web.service"
-          if [ ! -f "\${SERVICE_FILE}" ]; then
-            sudo bash -c "cat > \${SERVICE_FILE}" <<'UNITFILE'
-          [Unit]
-          Description=SecureCloud ASP.NET Core App
-          After=network.target
+          if [ ! -f "$SERVICE_FILE" ]; then
+            sudo tee "$SERVICE_FILE" >/dev/null <<UNITFILE
+[Unit]
+Description=SecureCloud ASP.NET Core App
+After=network.target
 
-          [Service]
-          WorkingDirectory=${APP_DIR}
-          ExecStart=/usr/bin/dotnet ${APP_DIR}/${APP_DLL}
-          Restart=always
-          RestartSec=10
-          KillSignal=SIGINT
-          SyslogIdentifier=securecloud-web
-          User=${{ secrets.VM_USERNAME }}
-          Environment=ASPNETCORE_URLS=http://127.0.0.1:5000
-          Environment=ASPNETCORE_ENVIRONMENT=Production
+[Service]
+WorkingDirectory=$APP_DIR
+ExecStart=/usr/bin/dotnet $APP_DIR/$APP_DLL
+Restart=always
+RestartSec=10
+KillSignal=SIGINT
+SyslogIdentifier=securecloud-web
+User=$VM_USER
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5000
+Environment=ASPNETCORE_ENVIRONMENT=Production
 
-          [Install]
-          WantedBy=multi-user.target
-          UNITFILE
+[Install]
+WantedBy=multi-user.target
+UNITFILE
           fi
 
-          RUNTIMECONFIG_FILE="${APP_DIR}/\${APP_DLL%.dll}.runtimeconfig.json"
-          if [ -f "\${RUNTIMECONFIG_FILE}" ]; then
-            REQUIRED_RUNTIME_VERSION=$(sed -n 's/.*"version":[[:space:]]*"\([0-9]\+\.[0-9]\+\)\..*/\1/p' "\${RUNTIMECONFIG_FILE}" | head -n1)
-            if [ -n "\${REQUIRED_RUNTIME_VERSION}" ] && ! dotnet --list-runtimes | grep -q "Microsoft.AspNetCore.App \${REQUIRED_RUNTIME_VERSION}"; then
+          RUNTIMECONFIG_FILE="$APP_DIR/${APP_DLL%.dll}.runtimeconfig.json"
+          if [ -f "$RUNTIMECONFIG_FILE" ]; then
+            REQUIRED_RUNTIME_VERSION=$(sed -n 's/.*"version":[[:space:]]*"\([0-9]\+\.[0-9]\+\)\..*/\1/p' "$RUNTIMECONFIG_FILE" | head -n1)
+            if [ -n "$REQUIRED_RUNTIME_VERSION" ] && ! dotnet --list-runtimes | grep -q "Microsoft.AspNetCore.App $REQUIRED_RUNTIME_VERSION"; then
               sudo apt-get update
-              sudo apt-get install -y "aspnetcore-runtime-\${REQUIRED_RUNTIME_VERSION}"
+              sudo apt-get install -y "aspnetcore-runtime-$REQUIRED_RUNTIME_VERSION"
             fi
           fi
 
           sudo systemctl daemon-reload
           sudo systemctl enable securecloud-web
           sudo systemctl restart securecloud-web
-          sudo systemctl status securecloud-web --no-pager
+          sudo systemctl --no-pager --full status securecloud-web || { sudo journalctl -u securecloud-web -n 80 --no-pager; exit 1; }
           EOF
