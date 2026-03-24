@@ -1,0 +1,106 @@
+name: Deploy ASP.NET Core to VM
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_dll:
+        description: "Published ASP.NET Core DLL name (example: MyApp.dll)"
+        required: true
+        default: "MyApp.dll"
+      webapp_ref:
+        description: "Branch, tag, or commit of the web app repo"
+        required: true
+        default: "main"
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, x64, vpn]
+
+    env:
+      VM_HOST: ${{ vars.VM_HOST || '10.0.1.4' }}
+      APP_DIR: /opt/securecloud/app
+      WEBAPP_REPO: ${{ vars.WEBAPP_REPO }}
+
+    steps:
+      - name: Ensure web app repo is configured
+        run: |
+          if [ -z "${WEBAPP_REPO}" ]; then
+            echo "Missing repository variable WEBAPP_REPO (format owner/repo)"
+            exit 1
+          fi
+
+      - name: Checkout web app repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WEBAPP_REPO }}
+          ref: ${{ github.event.inputs.webapp_ref }}
+          token: ${{ secrets.WEBAPP_REPO_PAT != '' && secrets.WEBAPP_REPO_PAT || github.token }}
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish ASP.NET Core app
+        run: |
+          dotnet restore
+          dotnet publish -c Release -o ./publish
+
+      - name: Ensure VM host is configured
+        run: |
+          if [ -z "${VM_HOST}" ]; then
+            echo "Missing repository variable VM_HOST"
+            exit 1
+          fi
+
+      - name: Upload published files to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.VM_HOST }}
+          username: ${{ secrets.VM_USERNAME }}
+          key: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+          source: "publish/*"
+          target: "/tmp/securecloud-deploy"
+          strip_components: 1
+
+      - name: Activate deployment on VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.VM_HOST }}
+          username: ${{ secrets.VM_USERNAME }}
+          key: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+          script: |
+            set -eux
+            sudo mkdir -p ${APP_DIR}
+            sudo cp -r /tmp/securecloud-deploy/* ${APP_DIR}/
+            sudo chown -R $USER:$USER ${APP_DIR}
+
+            APP_DLL="${{ github.event.inputs.app_dll || 'MyApp.dll' }}"
+            SERVICE_FILE="/etc/systemd/system/securecloud-web.service"
+
+            if [ ! -f "${SERVICE_FILE}" ]; then
+              sudo bash -c "cat > ${SERVICE_FILE}" <<EOF
+            [Unit]
+            Description=SecureCloud ASP.NET Core App
+            After=network.target
+
+            [Service]
+            WorkingDirectory=${APP_DIR}
+            ExecStart=/usr/bin/dotnet ${APP_DIR}/${APP_DLL}
+            Restart=always
+            RestartSec=10
+            KillSignal=SIGINT
+            SyslogIdentifier=securecloud-web
+            User=${USER}
+            Environment=ASPNETCORE_URLS=http://127.0.0.1:5000
+            Environment=ASPNETCORE_ENVIRONMENT=Production
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+            fi
+
+            sudo systemctl daemon-reload
+            sudo systemctl enable securecloud-web
+            sudo systemctl restart securecloud-web
+            sudo systemctl status securecloud-web --no-pager
