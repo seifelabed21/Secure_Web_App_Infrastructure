@@ -110,7 +110,7 @@ jobs:
           User=$VM_USER
           Environment=ASPNETCORE_URLS=http://127.0.0.1:5000
           Environment=ASPNETCORE_ENVIRONMENT=Production
-          Environment=ConnectionStrings__DefaultConnection=$DB_CONNECTION_STRING
+          Environment="ConnectionStrings__DefaultConnection=$DB_CONNECTION_STRING"
 
           [Install]
           WantedBy=multi-user.target
