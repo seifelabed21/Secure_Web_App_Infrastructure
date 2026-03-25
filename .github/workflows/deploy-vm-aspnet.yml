@@ -22,12 +22,20 @@ jobs:
       APP_DIR: /opt/securecloud/app
       WEBAPP_REPO: ${{ vars.WEBAPP_REPO }}
       APP_DLL: ${{ github.event.inputs.app_dll || 'MyApp.dll' }}
+      DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
 
     steps:
       - name: Ensure web app repo is configured
         run: |
           if [ -z "${WEBAPP_REPO}" ]; then
             echo "Missing repository variable WEBAPP_REPO (format owner/repo)"
+            exit 1
+          fi
+
+      - name: Ensure DB connection string is configured
+        run: |
+          if [ -z "${DB_CONNECTION_STRING}" ]; then
+            echo "Missing repository secret DB_CONNECTION_STRING"
             exit 1
           fi
 
@@ -73,33 +81,40 @@ jobs:
       - name: Activate deployment on VM
         run: |
           set -eux
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.VM_USERNAME }}@${VM_HOST} "APP_DIR='${APP_DIR}' APP_DLL='${APP_DLL}' VM_USER='${{ secrets.VM_USERNAME }}' bash -s" <<'EOF'
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.VM_USERNAME }}@${VM_HOST} "APP_DIR='${APP_DIR}' APP_DLL='${APP_DLL}' VM_USER='${{ secrets.VM_USERNAME }}' DB_CONNECTION_STRING='${DB_CONNECTION_STRING}' bash -s" <<'EOF'
           set -euxo pipefail
           sudo mkdir -p "$APP_DIR"
           sudo cp -r /tmp/securecloud-deploy/* "$APP_DIR"/
           sudo chown -R "$VM_USER":"$VM_USER" "$APP_DIR"
 
           SERVICE_FILE="/etc/systemd/system/securecloud-web.service"
-          if [ ! -f "$SERVICE_FILE" ]; then
-            sudo bash -c "printf '%s\n' \
-              '[Unit]' \
-              'Description=SecureCloud ASP.NET Core App' \
-              'After=network.target' \
-              '' \
-              '[Service]' \
-              'WorkingDirectory=$APP_DIR' \
-              'ExecStart=$APP_DIR/${APP_DLL%.dll}' \
-              'Restart=always' \
-              'RestartSec=10' \
-              'KillSignal=SIGINT' \
-              'SyslogIdentifier=securecloud-web' \
-              'User=$VM_USER' \
-              'Environment=ASPNETCORE_URLS=http://127.0.0.1:5000' \
-              'Environment=ASPNETCORE_ENVIRONMENT=Production' \
-              '' \
-              '[Install]' \
-              'WantedBy=multi-user.target' > '$SERVICE_FILE'"
+          APP_EXEC="$APP_DIR/${APP_DLL%.dll}"
+          if [ -x "$APP_EXEC" ]; then
+            EXEC_START="$APP_EXEC"
+          else
+            EXEC_START="/usr/bin/dotnet $APP_DIR/$APP_DLL"
           fi
+
+          sudo tee "$SERVICE_FILE" > /dev/null <<SERVICE
+[Unit]
+Description=SecureCloud ASP.NET Core App
+After=network.target
+
+[Service]
+WorkingDirectory=$APP_DIR
+ExecStart=$EXEC_START
+Restart=always
+RestartSec=10
+KillSignal=SIGINT
+SyslogIdentifier=securecloud-web
+User=$VM_USER
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5000
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ConnectionStrings__DefaultConnection=$DB_CONNECTION_STRING
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
 
           RUNTIMECONFIG_FILE="$APP_DIR/${APP_DLL%.dll}.runtimeconfig.json"
           if [ -f "$RUNTIMECONFIG_FILE" ]; then
