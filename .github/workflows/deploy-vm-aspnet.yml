@@ -18,6 +18,7 @@ jobs:
 
     env:
       VM_HOST: ${{ vars.VM_HOST || '10.0.1.4' }}
+      APP_HEALTH_URL: ${{ vars.APP_HEALTH_URL || 'https://20.111.42.85' }}
       APP_DIR: /opt/securecloud/app
       WEBAPP_REPO: ${{ vars.WEBAPP_REPO }}
       APP_DLL: ${{ github.event.inputs.app_dll || 'MyApp.dll' }}
@@ -114,3 +115,9 @@ jobs:
           sudo systemctl restart securecloud-web
           sudo systemctl --no-pager --full status securecloud-web || { sudo journalctl -u securecloud-web -n 80 --no-pager; exit 1; }
           EOF
+
+      - name: Health check through Application Gateway
+        run: |
+          set -eux
+          curl -kfsS --retry 8 --retry-delay 5 --retry-all-errors "${APP_HEALTH_URL}" > /dev/null
+          echo "Health check passed: ${APP_HEALTH_URL}"
