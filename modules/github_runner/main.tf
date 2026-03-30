@@ -68,12 +68,14 @@ resource "azurerm_linux_virtual_machine" "runner_vm" {
 
     if [ -z "$REG_TOKEN" ]; then
       echo "runner_registration_token is empty. Generate one in GitHub and re-run this script."
-      echo "Example: sudo runner_registration_token=<token> /usr/local/bin/configure-github-runner.sh"
+      echo "Example: RUNNER_REGISTRATION_TOKEN=<token> /usr/local/bin/configure-github-runner.sh"
       exit 1
     fi
 
     cd /opt/actions-runner
-    ./config.sh --unattended --replace --url "$REPO_URL" --token "$REG_TOKEN" --labels "${local.labels_csv}" --name "$(hostname)"
+    # Run config.sh as runner user (it rejects sudo)
+    su runner -c "./config.sh --unattended --replace --url \"$REPO_URL\" --token \"$REG_TOKEN\" --labels \"${local.labels_csv}\" --name \"$(hostname)\""
+    # Install and start as root
     ./svc.sh install runner
     ./svc.sh start
     SCRIPT
