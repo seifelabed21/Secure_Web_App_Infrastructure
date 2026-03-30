@@ -2,6 +2,7 @@ data "azurerm_client_config" "current" {}
 
 locals {
 	key_vault_name = substr(lower("kv${replace(replace(var.project_name, "-", ""), "_", "")}${substr(md5(var.resource_group_name), 0, 6)}"), 0, 24)
+	use_custom_certificate = trimspace(var.ssl_certificate_pfx_path) != ""
 }
 
 resource "azurerm_user_assigned_identity" "appgw_identity" {
@@ -40,7 +41,21 @@ resource "azurerm_key_vault_access_policy" "appgw" {
 	secret_permissions = ["Get", "List"]
 }
 
-resource "azurerm_key_vault_certificate" "appgw_cert" {
+resource "azurerm_key_vault_certificate" "appgw_custom_cert" {
+	count        = local.use_custom_certificate ? 1 : 0
+	name         = var.ssl_certificate_name
+	key_vault_id = azurerm_key_vault.appgw_kv.id
+
+	certificate {
+		contents = filebase64(var.ssl_certificate_pfx_path)
+		password = var.ssl_certificate_pfx_password
+	}
+
+	depends_on = [azurerm_key_vault_access_policy.current]
+}
+
+resource "azurerm_key_vault_certificate" "appgw_self_signed_cert" {
+	count        = local.use_custom_certificate ? 0 : 1
 	name         = var.ssl_certificate_name
 	key_vault_id = azurerm_key_vault.appgw_kv.id
 
@@ -134,7 +149,7 @@ resource "azurerm_application_gateway" "appgw" {
 
 	ssl_certificate {
 		name                = var.ssl_certificate_name
-		key_vault_secret_id = azurerm_key_vault_certificate.appgw_cert.secret_id
+		key_vault_secret_id = local.use_custom_certificate ? azurerm_key_vault_certificate.appgw_custom_cert[0].secret_id : azurerm_key_vault_certificate.appgw_self_signed_cert[0].secret_id
 	}
 
 	backend_address_pool {

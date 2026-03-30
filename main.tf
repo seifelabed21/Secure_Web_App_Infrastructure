@@ -69,6 +69,10 @@ module "appgateway" {
   project_name        = var.project_name
   app_gateway_subnet_id = module.networking.app_gateway_subnet_id
   backend_ip_addresses = [module.appservice.private_ip_address]
+  backend_host_name            = trimspace(var.app_public_domain) != "" ? var.app_public_domain : "localhost"
+  ssl_certificate_subject      = trimspace(var.app_public_domain) != "" ? "CN=${var.app_public_domain}" : "CN=app.local"
+  ssl_certificate_pfx_path     = var.ssl_certificate_pfx_path
+  ssl_certificate_pfx_password = var.ssl_certificate_pfx_password
   tags                = var.tags
 }
 

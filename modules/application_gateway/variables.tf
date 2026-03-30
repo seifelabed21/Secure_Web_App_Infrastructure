@@ -60,6 +60,24 @@ variable "ssl_certificate_name" {
 	default     = "appgw-tls-cert"
 }
 
+variable "ssl_certificate_pfx_path" {
+	type        = string
+	description = "Optional path to a trusted TLS certificate in PFX format to import into Key Vault"
+	default     = ""
+}
+
+variable "ssl_certificate_pfx_password" {
+	type        = string
+	description = "Password for the TLS PFX certificate"
+	default     = ""
+	sensitive   = true
+
+	validation {
+		condition     = trimspace(var.ssl_certificate_pfx_path) == "" || length(trimspace(var.ssl_certificate_pfx_password)) > 0
+		error_message = "ssl_certificate_pfx_password must be set when ssl_certificate_pfx_path is provided."
+	}
+}
+
 variable "ssl_certificate_subject" {
 	type        = string
 	description = "Subject name used to generate a self-signed TLS certificate"

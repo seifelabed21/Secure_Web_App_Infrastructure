@@ -30,5 +30,5 @@ output "https_url" {
 
 output "certificate_secret_id" {
 	description = "Key Vault secret ID used by the HTTPS listener certificate"
-	value       = azurerm_key_vault_certificate.appgw_cert.secret_id
+	value       = local.use_custom_certificate ? azurerm_key_vault_certificate.appgw_custom_cert[0].secret_id : azurerm_key_vault_certificate.appgw_self_signed_cert[0].secret_id
 }

@@ -79,3 +79,27 @@ variable "runner_registration_token" {
   default     = ""
   sensitive   = true
 }
+
+variable "ssl_certificate_pfx_path" {
+  description = "Optional path to a trusted TLS certificate in PFX format for App Gateway"
+  type        = string
+  default     = ""
+}
+
+variable "app_public_domain" {
+  description = "Public domain served by Application Gateway and used for backend host/probe header"
+  type        = string
+  default     = ""
+}
+
+variable "ssl_certificate_pfx_password" {
+  description = "Password for the App Gateway trusted TLS PFX certificate"
+  type        = string
+  default     = ""
+  sensitive   = true
+
+  validation {
+    condition     = trimspace(var.ssl_certificate_pfx_path) == "" || length(trimspace(var.ssl_certificate_pfx_password)) > 0
+    error_message = "ssl_certificate_pfx_password must be set when ssl_certificate_pfx_path is provided."
+  }
+}

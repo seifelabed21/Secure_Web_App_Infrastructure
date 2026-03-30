@@ -1,0 +1,97 @@
+name: Deploy OWASP Juice Shop to VM
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "OWASP Juice Shop image tag"
+        required: true
+        default: "latest"
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, x64, vpn]
+
+    env:
+      VM_HOST: ${{ vars.VM_HOST || '10.0.1.4' }}
+      APP_HEALTH_URL: ${{ vars.APP_HEALTH_URL || 'https://20.111.42.85' }}
+      JUICE_IMAGE: ${{ vars.JUICE_IMAGE || 'bkimminich/juice-shop' }}
+      JUICE_IMAGE_TAG: ${{ github.event.inputs.image_tag || 'latest' }}
+
+    steps:
+      - name: Ensure VM host is configured
+        run: |
+          if [ -z "${VM_HOST}" ]; then
+            echo "Missing repository variable VM_HOST"
+            exit 1
+          fi
+
+      - name: Prepare SSH key
+        run: |
+          set -eux
+          mkdir -p ~/.ssh
+          printf "%s" "${{ secrets.VM_SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Deploy Juice Shop container on VM
+        run: |
+          set -eux
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.VM_USERNAME }}@${VM_HOST} "JUICE_IMAGE='${JUICE_IMAGE}' JUICE_IMAGE_TAG='${JUICE_IMAGE_TAG}' VM_USER='${{ secrets.VM_USERNAME }}' bash -s" <<'EOF'
+          set -euxo pipefail
+
+          if ! command -v docker >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ca-certificates curl gnupg
+            sudo install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            sudo chmod a+r /etc/apt/keyrings/docker.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            sudo apt-get update
+            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            sudo systemctl enable docker
+            sudo systemctl start docker
+          fi
+
+          if systemctl list-unit-files | grep -q '^securecloud-web.service'; then
+            sudo systemctl stop securecloud-web || true
+            sudo systemctl disable securecloud-web || true
+          fi
+
+          sudo docker rm -f securecloud-juice-shop || true
+          sudo docker pull "${JUICE_IMAGE}:${JUICE_IMAGE_TAG}"
+          sudo docker run -d \
+            --name securecloud-juice-shop \
+            --restart unless-stopped \
+            -p 127.0.0.1:3000:3000 \
+            "${JUICE_IMAGE}:${JUICE_IMAGE_TAG}"
+
+          sudo tee /etc/nginx/sites-available/default > /dev/null <<'NGINXCONF'
+          server {
+            listen 80 default_server;
+            listen [::]:80 default_server;
+
+            location / {
+              proxy_pass http://127.0.0.1:3000;
+              proxy_http_version 1.1;
+              proxy_set_header Upgrade $http_upgrade;
+              proxy_set_header Connection keep-alive;
+              proxy_set_header Host $host;
+              proxy_cache_bypass $http_upgrade;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+            }
+          }
+          NGINXCONF
+
+          sudo nginx -t
+          sudo systemctl enable nginx
+          sudo systemctl restart nginx
+          sudo docker ps --filter name=securecloud-juice-shop
+          curl -fsS --retry 8 --retry-delay 3 --retry-all-errors http://127.0.0.1/ > /dev/null
+          EOF
+
+      - name: Health check through Application Gateway
+        run: |
+          set -eux
+          curl -kfsS --retry 8 --retry-delay 5 --retry-all-errors "${APP_HEALTH_URL}" > /dev/null
+          echo "Health check passed: ${APP_HEALTH_URL}"
